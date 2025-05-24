@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Models\ProductList;
+
 
 class UserController extends Controller
 {
@@ -16,4 +18,7 @@ class UserController extends Controller
     public function test(){
         return view('welcome',);
     }
+
+
+
 }
