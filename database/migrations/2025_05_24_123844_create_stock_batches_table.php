@@ -12,18 +12,17 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('stock_batches', function (Blueprint $table) {
-            $table->string("batch_id")->primary();
-            $table->string("product_id")->index();
-            $table->string("product_name");
-            $table->integer("remaining_quantity")->default(0);
-            $table->decimal("unit_cost")->default(0.00);
-            $table->timestamps("received_at");
+            $table->string('batch_id');
+            $table->string('product_id');
+            $table->string('product_name');
+            $table->integer('remaining_quantity');
+            $table->decimal('unit_cost', 8, 2);
+            $table->timestamp('received_at');
+            $table->timestamps();
         });
+
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('stock_batches');
