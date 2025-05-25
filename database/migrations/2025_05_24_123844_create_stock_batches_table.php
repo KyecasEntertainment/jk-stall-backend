@@ -14,6 +14,7 @@ return new class extends Migration
         Schema::create('stock_batches', function (Blueprint $table) {
             $table->string('batch_id');
             $table->string('product_id');
+            $table->foreign('product_id')->references('product_id')->on('products_lists')->onDelete('cascade');
             $table->string('product_name');
             $table->integer('remaining_quantity');
             $table->decimal('unit_cost', 8, 2);

@@ -20,4 +20,9 @@ class StockBatches extends Model
         'unit_cost',
         'received_at'
     ];
+
+    public function product()
+    {
+        return $this->belongsTo(ProductsList::class, 'product_id', 'product_id');
+    }
 }

@@ -12,7 +12,13 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('daily_stock_activities', function (Blueprint $table) {
-            $table->id();
+            $table->string("activity_id")->primary();
+            $table->string("product_id")->index();
+            $table->foreign("product_id")->references("product_id")->on("products_lists")->onDelete("cascade");
+            $table->timestamp("date")->index();
+            $table->string("displayed_quantity")->nullable();
+            $table->string("back_quantity")->nullable();
+            $table->string("notes")->nullable();
             $table->timestamps();
         });
     }
@@ -24,4 +30,5 @@ return new class extends Migration
     {
         Schema::dropIfExists('daily_stock_activities');
     }
+
 };
