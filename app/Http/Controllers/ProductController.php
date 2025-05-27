@@ -40,7 +40,7 @@ class ProductController extends Controller
         ], 201);
     }
 
-    public function viewProduct(){
+    public function viewProducts(){
         $products = ProductsList::all()->map(function ($product) {
             return [
                 'product_id' => $product->product_id,
@@ -51,17 +51,37 @@ class ProductController extends Controller
         return response()->json($products);
     }
 
-    public function editProduct($id)
+    public function updateProductName(Request $request, $id)
     {
-        $product = ProductsList::find($id);
-        if (!$product) {
-            return response()->json(['error' => 'Product not found.'], 404);
-        }
-
-        return response()->json([
-            'product_id' => $product->product_id,
-            'product_name' => $product->product_name,
+        $request->validate([
+            'product_name' => 'required|string|max:255',
         ]);
+
+        try {
+            $product = ProductsList::where('product_id', $id)->first();
+            if (!$product) {
+                return response()->json(['error' => 'Product not found.'], 404);
+            }
+
+            // Check if new product name already exists (excluding current product)
+            $existingProduct = ProductsList::where('product_name', $request->input('product_name'))
+                ->where('product_id', '!=', $product->product_id)
+                ->first();
+            if ($existingProduct) {
+                return response()->json(['error' => 'Product name already exists.'], 409);
+            }
+
+            $product->product_name = $request->input('product_name');
+            $product->save();
+
+            return response()->json([
+                'message' => 'Product name updated successfully.',
+                'product_id' => $product->product_id,
+                'product_name' => $product->product_name,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
     }
 
     public function createBatch(Request $request)
@@ -123,7 +143,7 @@ class ProductController extends Controller
                 $products[] = [
                     'product_id' => $productId,
                     'product_name' => $productName,
-                    'price' => (string)$prices[$i],
+                    'price' => (string)$prices[$i] . ' Pesos',
                     'quantity' => (string)$quantities[$i],
                 ];
             } catch (\Exception $e) {
@@ -138,7 +158,23 @@ class ProductController extends Controller
         ]);
     }
 
+    public function viewBatches()
+    {
+        $batches = StockBatches::all()->map(function ($batch) {
+            return [
+                'batch_id' => $batch->batch_id,
+                'product_id' => $batch->product_id,
+                'product_name' => $batch->product_name,
+                'entry_quantity' => (string)$batch->entry_quantity,
+                'unit_cost' => (string)$batch->unit_cost,
+                'received_at' => $batch->received_at->toDateTimeString(),
+            ];
+        });
 
+        return response()->json($batches);
+    }
+
+    // Fix notes not being saved on the database
     public function displayProductsQuantity(Request $request){
         $request->validate([
             'product_id' => 'required|array',
@@ -204,7 +240,8 @@ class ProductController extends Controller
         ]);
     }
 
-    public function backProductsQuantity(Request $request)
+    // Fix notes not being saved on the database
+    public function returnProductsQuantity(Request $request)
     {
         $request->validate([
             'product_id' => 'required|array',
@@ -294,23 +331,41 @@ class ProductController extends Controller
         return response()->json($products);
     }
 
-    public function calculateSoldProductsToday(){
-        $today = now()->startOfDay();
-        $soldProducts = DailyStockActivity::where('date', '>=', $today)
-            ->whereNotNull('displayed_quantity')
-            ->get()
-            ->groupBy('product_id')
-            ->map(function ($items) {
-                $first = $items->first();
-                $totalDisplayed = $items->sum('displayed_quantity');
-                return [
-                    'product_id' => $first->product_id,
-                    'product_name' => $first->product->product_name,
-                    'total_displayed' => (string)$totalDisplayed,
-                ];
-            })
-            ->values();
+    public function calculateSoldProductsToday()
+    {
+        $products = TotalProductQuantity::where('total_displayed_quantity', '>', 0)->get();
 
-        return response()->json($soldProducts);
+        $result = [];
+        $totalSum = 0;
+
+        foreach ($products as $product) {
+            $latestBatch = StockBatches::where('product_id', $product->product_id)
+                ->orderByDesc('received_at')
+                ->first();
+
+            $unitCost = $latestBatch ? $latestBatch->unit_cost : 0;
+            $soldQty = $product->total_displayed_quantity;
+            $subtotal = $soldQty * $unitCost;
+
+            // Reset total_displayed_quantity to 0 after calculation
+            $product->sold_quantity = $soldQty;
+            $product->total_displayed_quantity = 0;
+            $product->save();
+
+            $result[] = [
+                'product_id' => $product->product_id,
+                'product_name' => $latestBatch ? $latestBatch->product_name : null,
+                'sold_quantity' => $soldQty,
+                'unit_cost' => $unitCost,
+                'subtotal' => $subtotal,
+            ];
+
+            $totalSum += $subtotal;
+        }
+
+        return response()->json([
+            'products' => $result,
+            'total_sum' => $totalSum,
+        ]);
     }
 }

@@ -18,7 +18,8 @@ return new class extends Migration
             $table->foreign("product_id")->references("product_id")->on("products_lists")->onDelete("cascade");
             $table->timestamp("date")->index();
             $table->string("displayed_quantity")->nullable();
-            $table->string("back_quantity")->nullable();
+            $table->string("returned_quantity")->nullable();
+            $table->string("sold_quantity")->nullable();
             $table->string("notes")->nullable();
             $table->timestamps();
         });
