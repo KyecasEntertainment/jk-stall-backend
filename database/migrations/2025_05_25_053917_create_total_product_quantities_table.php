@@ -11,14 +11,14 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('daily_stock_activities', function (Blueprint $table) {
+        Schema::create('total_product_quantities', function (Blueprint $table) {
             $table->id();
-            $table->string("activity_id");
             $table->string("product_id")->index();
             $table->foreign("product_id")->references("product_id")->on("products_lists")->onDelete("cascade");
-            $table->timestamp("date")->index();
-            $table->string("displayed_quantity")->nullable();
-            $table->string("back_quantity")->nullable();
+            $table->string("all_total_quantity")->nullable();
+            $table->string("current_total_quantity")->nullable();
+            $table->string("total_displayed_quantity")->nullable();
+            $table->string("sold_quantity")->nullable();
             $table->string("notes")->nullable();
             $table->timestamps();
         });
@@ -29,7 +29,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('daily_stock_activities');
+        Schema::dropIfExists('total_product_quantities');
     }
-
 };

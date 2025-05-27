@@ -16,7 +16,7 @@ return new class extends Migration
             $table->string('product_id');
             $table->foreign('product_id')->references('product_id')->on('products_lists')->onDelete('cascade');
             $table->string('product_name');
-            $table->integer('remaining_quantity');
+            $table->integer('entry_quantity');
             $table->decimal('unit_cost', 8, 2);
             $table->timestamp('received_at');
             $table->timestamps();

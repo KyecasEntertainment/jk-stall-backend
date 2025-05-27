@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\StockBatches;
 use App\Models\DailyStockActivity;
+use App\Models\TotalProductQuantity;
 use App\Models\ProductsList;
 use Illuminate\Support\Str;
 
@@ -16,6 +17,14 @@ class ProductController extends Controller
         $request->validate([
             'product_name' => 'required|string|max:255',
         ]);
+
+        // Check if product name already exists
+        $existingProduct = ProductsList::where('product_name', $request->input('product_name'))->first();
+        if ($existingProduct) {
+            return response()->json([
+                'error' => 'Product name already exists.'
+            ], 409);
+        }
 
         $productID =  'prod-' . Str::uuid();
 
@@ -29,9 +38,31 @@ class ProductController extends Controller
             'product_id' => $productID,
             'product_name' => $request->input('product_name')
         ], 201);
-
     }
 
+    public function viewProduct(){
+        $products = ProductsList::all()->map(function ($product) {
+            return [
+                'product_id' => $product->product_id,
+                'product_name' => $product->product_name,
+            ];
+        });
+
+        return response()->json($products);
+    }
+
+    public function editProduct($id)
+    {
+        $product = ProductsList::find($id);
+        if (!$product) {
+            return response()->json(['error' => 'Product not found.'], 404);
+        }
+
+        return response()->json([
+            'product_id' => $product->product_id,
+            'product_name' => $product->product_name,
+        ]);
+    }
 
     public function createBatch(Request $request)
     {
@@ -44,7 +75,7 @@ class ProductController extends Controller
             'quantity.*' => 'required|integer|min:1',
         ]);
 
-        $batchId = 'batch_' . uniqid();
+        $batchId = 'batch_' . date('mdY') . '_' . uniqid();
         $products = [];
 
         $productIds = $request->input('products_id');
@@ -70,21 +101,36 @@ class ProductController extends Controller
                     'batch_id' => $batchId,
                     'product_id' => $productId,
                     'product_name' => $productName,
-                    'remaining_quantity' => $quantities[$i],
+                    'entry_quantity' => $quantities[$i],
                     'unit_cost' => $prices[$i],
                     'received_at' => now(),
                 ]);
+
+                $totalProduct = TotalProductQuantity::where('product_id', $productId)->first();
+
+                if ($totalProduct) {
+                    $totalProduct->all_total_quantity += $quantities[$i];
+                    $totalProduct->current_total_quantity += $quantities[$i];
+                    $totalProduct->save();
+                } else {
+                    TotalProductQuantity::create([
+                        'product_id' => $productId,
+                        'all_total_quantity' => $quantities[$i],
+                        'current_total_quantity' => $quantities[$i],
+                    ]);
+                }
+
+                $products[] = [
+                    'product_id' => $productId,
+                    'product_name' => $productName,
+                    'price' => (string)$prices[$i],
+                    'quantity' => (string)$quantities[$i],
+                ];
             } catch (\Exception $e) {
                 return response()->json(['error' => $e->getMessage()], 500);
             }
-
-            $products[] = [
-                'product_id' => $productId,
-                'product_name' => $productName,
-                'price' => (string)$prices[$i],
-                'quantity' => (string)$quantities[$i],
-            ];
         }
+
 
         return response()->json([
             'batch_id' => $batchId,
@@ -93,33 +139,178 @@ class ProductController extends Controller
     }
 
 
-    public function outProductsQuantity(){
-    
+    public function displayProductsQuantity(Request $request){
+        $request->validate([
+            'product_id' => 'required|array',
+            'product_id.*' => 'required|string|max:255',
+            'displayed_quantity' => 'required|array',
+            'displayed_quantity.*' => 'required|integer|min:0',
+            'notes' => 'nullable|string|max:255',
+        ]);
+
+        $activityId = 'display_' . Str::uuid();
+        $productIds = $request->input('product_id');
+        $displayedQuantities = $request->input('displayed_quantity');
+        $notes = $request->input('notes', null);
+
+        $displayed = [];
+
+        try {
+            for ($i = 0; $i < count($productIds); $i++) {
+                $productId = $productIds[$i];
+                $displayQty = $displayedQuantities[$i];
+
+                $displayed[] = [
+                    'product_id' => $productId,
+                    'displayed_quantity' => (string)$displayQty,
+                ];
+
+                $productQty = TotalProductQuantity::where('product_id', $productId)->first();
+
+                if (!$productQty) {
+                    return response()->json([
+                        'error' => "Product {$productId} not found or there's no data for it."
+                    ], 404);
+                }
+
+                if ($displayQty > $productQty->current_total_quantity) {
+                    return response()->json([
+                        'error' => "Displayed quantity for product {$productId} exceeds current available quantity."
+                    ], 400);
+                }
+
+                $productQty->current_total_quantity = max(0, $productQty->current_total_quantity - $displayQty);
+                $productQty->total_displayed_quantity += $displayQty;
+                $productQty->save();
+
+                // Record activity
+                DailyStockActivity::create([
+                    'activity_id' => $activityId,
+                    'product_id' => $productId,
+                    'date' => now(),
+                    'displayed_quantity' => $displayQty,
+                    'back_quantity' => 0,
+                    'notes' => $notes,
+                ]);
+            }
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+
+        return response()->json([
+            'activity_id' => $activityId,
+            'displayed' => $displayed,
+            'notes' => $notes,
+        ]);
     }
 
-    public function backProductsQuantity(){
+    public function backProductsQuantity(Request $request)
+    {
+        $request->validate([
+            'product_id' => 'required|array',
+            'product_id.*' => 'required|string|max:255',
+            'returned_quantity' => 'required|array',
+            'returned_quantity.*' => 'required|integer|min:0',
+            'notes' => 'nullable|string|max:255',
+        ]);
 
+        $activityId = 'back_' . Str::uuid();
+        $productIds = $request->input('product_id');
+        $returnedQuantities = $request->input('returned_quantity');
+        $notes = $request->input('notes', null);
+
+        if (count($productIds) !== count($returnedQuantities)) {
+            return response()->json(['error' => 'Input arrays must be of the same length.'], 422);
+        }
+
+        $returned = [];
+
+        try {
+            for ($i = 0; $i < count($productIds); $i++) {
+                $productId = $productIds[$i];
+                $returnQty = $returnedQuantities[$i];
+
+                $returned[] = [
+                    'product_id' => $productId,
+                    'returned_quantity' => (string)$returnQty,
+                ];
+
+                $productQty = TotalProductQuantity::where('product_id', $productId)->first();
+
+                if (!$productQty) {
+                    return response()->json([
+                        'error' => "Product {$productId} not found."
+                    ], 404);
+                }
+
+                if ($returnQty > $productQty->total_displayed_quantity) {
+                    return response()->json([
+                        'error' => "Returned quantity for product {$productId} exceeds displayed quantity."
+                    ], 400);
+                }
+
+                $productQty->current_total_quantity += $returnQty;
+                $productQty->total_displayed_quantity = max(0, $productQty->total_displayed_quantity - $returnQty);
+                $productQty->save();
+
+                // Record activity
+                DailyStockActivity::create([
+                    'activity_id' => $activityId,
+                    'product_id' => $productId,
+                    'date' => now(),
+                    'displayed_quantity' => 0,
+                    'back_quantity' => $returnQty,
+                    'notes' => $notes,
+                ]);
+            }
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+
+        return response()->json([
+            'activity_id' => $activityId,
+            'returned' => $returned,
+            'notes' => $notes,
+        ]);
     }
-
-
 
     // This Totals all without the outProducts and backProducts
     public function viewProductsQuantity()
     {
-        $products = StockBatches::select('product_id', 'product_name', 'remaining_quantity')
+        $products = StockBatches::select('product_id', 'product_name', 'entry_quantity')
             ->get()
             ->groupBy('product_id')
             ->map(function ($items) {
             $first = $items->first();
-            $totalQuantity = $items->sum('remaining_quantity');
+            $totalQuantity = $items->sum('entry_quantity');
             return [
                 'product_id' => $first->product_id,
                 'product_name' => $first->product_name,
-                'remaining_quantity' => (string)$totalQuantity,
+                'entry_quantity' => (string)$totalQuantity,
             ];
             })
             ->values();
 
         return response()->json($products);
+    }
+
+    public function calculateSoldProductsToday(){
+        $today = now()->startOfDay();
+        $soldProducts = DailyStockActivity::where('date', '>=', $today)
+            ->whereNotNull('displayed_quantity')
+            ->get()
+            ->groupBy('product_id')
+            ->map(function ($items) {
+                $first = $items->first();
+                $totalDisplayed = $items->sum('displayed_quantity');
+                return [
+                    'product_id' => $first->product_id,
+                    'product_name' => $first->product->product_name,
+                    'total_displayed' => (string)$totalDisplayed,
+                ];
+            })
+            ->values();
+
+        return response()->json($soldProducts);
     }
 }

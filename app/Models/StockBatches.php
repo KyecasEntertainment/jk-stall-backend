@@ -16,7 +16,7 @@ class StockBatches extends Model
         'batch_id',
         'product_id',
         'product_name',
-        'remaining_quantity',
+        'entry_quantity',
         'unit_cost',
         'received_at'
     ];
