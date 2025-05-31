@@ -13,7 +13,8 @@ class DailyStockActivity extends Model
         'product_id',
         'date',
         'displayed_quantity',
-        'back_quantity',
+        'returned_quantity',
+        'sold_quantity',
         'notes'
     ];
 

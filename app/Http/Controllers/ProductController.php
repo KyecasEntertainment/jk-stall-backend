@@ -15,29 +15,46 @@ class ProductController extends Controller
     public function createProduct(Request $request)
     {
         $request->validate([
-            'product_name' => 'required|string|max:255',
+            'product_name' => 'required|array',
+            'product_name.*' => 'required|string|max:255',
         ]);
 
-        // Check if product name already exists
-        $existingProduct = ProductsList::where('product_name', $request->input('product_name'))->first();
-        if ($existingProduct) {
-            return response()->json([
-                'error' => 'Product name already exists.'
-            ], 409);
+        $createdProducts = [];
+        $errors = [];
+
+        foreach ($request->input('product_name') as $name) {
+            $existingProduct = ProductsList::where('product_name', $name)->first();
+            if ($existingProduct) {
+                $errors[] = [
+                    'product_name' => $name,
+                    'error' => 'Product name already exists.'
+                ];
+                continue;
+            }
+
+            $productID = 'prod-' . Str::uuid();
+
+            ProductsList::create([
+                'product_id' => $productID,
+                'product_name' => $name,
+            ]);
+
+            $createdProducts[] = [
+                'product_id' => $productID,
+                'product_name' => $name
+            ];
         }
 
-        $productID =  'prod-' . Str::uuid();
+        $response = [
+            'message' => 'Product creation completed.',
+            'created_products' => $createdProducts,
+        ];
 
-        ProductsList::create([
-            'product_id' => $productID,
-            'product_name' => $request->input('product_name'),
-        ]);
+        if (!empty($errors)) {
+            $response['errors'] = $errors;
+        }
 
-        return response()->json([
-            'message' => 'Product created successfully.',
-            'product_id' => $productID,
-            'product_name' => $request->input('product_name')
-        ], 201);
+        return response()->json($response, empty($createdProducts) ? 409 : 201);
     }
 
     public function viewProducts(){
@@ -84,13 +101,36 @@ class ProductController extends Controller
         }
     }
 
+    public function deleteProduct($id)
+    {
+        try {
+            $product = ProductsList::where('product_id', $id)->first();
+            if (!$product) {
+                return response()->json(['error' => 'Product not found.'], 404);
+            }
+
+            // Check if there are any batches associated with this product
+            if (StockBatches::where('product_id', $id)->exists()) {
+                return response()->json(['error' => 'Cannot delete product with existing stock batches.'], 400);
+            }
+
+            $product->delete();
+
+            return response()->json(['message' => 'Product deleted successfully.']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
     public function createBatch(Request $request)
     {
         $request->validate([
             'products_id' => 'required|array',
             'products_id.*' => 'required|string|max:255',
-            'price' => 'required|array',
-            'price.*' => 'required|numeric',
+            'original_price' => 'required|array',
+            'original_price.*' => 'required|numeric',
+            'selling_price' => 'required|array',
+            'selling_price.*' => 'required|numeric',
             'quantity' => 'required|array',
             'quantity.*' => 'required|integer|min:1',
         ]);
@@ -99,10 +139,15 @@ class ProductController extends Controller
         $products = [];
 
         $productIds = $request->input('products_id');
-        $prices = $request->input('price');
+        $originalPrices = $request->input('original_price');
+        $sellingPrices = $request->input('selling_price');
         $quantities = $request->input('quantity');
 
-        if (count($productIds) !== count($prices) || count($prices) !== count($quantities)) {
+        if (
+            count($productIds) !== count($originalPrices) ||
+            count($originalPrices) !== count($sellingPrices) ||
+            count($sellingPrices) !== count($quantities)
+        ) {
             return response()->json(['error' => 'Input arrays must be of the same length.'], 422);
         }
 
@@ -122,7 +167,8 @@ class ProductController extends Controller
                     'product_id' => $productId,
                     'product_name' => $productName,
                     'entry_quantity' => $quantities[$i],
-                    'unit_cost' => $prices[$i],
+                    'original_cost' => $originalPrices[$i],
+                    'selling_cost' => $sellingPrices[$i],
                     'received_at' => now(),
                 ]);
 
@@ -143,14 +189,14 @@ class ProductController extends Controller
                 $products[] = [
                     'product_id' => $productId,
                     'product_name' => $productName,
-                    'price' => (string)$prices[$i] . ' Pesos',
+                    'original_cost' => (string)$originalPrices[$i] . ' Pesos',
+                    'selling_cost' => (string)$sellingPrices[$i] . ' Pesos',
                     'quantity' => (string)$quantities[$i],
                 ];
             } catch (\Exception $e) {
                 return response()->json(['error' => $e->getMessage()], 500);
             }
         }
-
 
         return response()->json([
             'batch_id' => $batchId,
@@ -166,7 +212,8 @@ class ProductController extends Controller
                 'product_id' => $batch->product_id,
                 'product_name' => $batch->product_name,
                 'entry_quantity' => (string)$batch->entry_quantity,
-                'unit_cost' => (string)$batch->unit_cost,
+                'original_cost' => (string)$batch->original_cost . ' Pesos',
+                'selling_cost' => (string)$batch->selling_cost . ' Pesos',
                 'received_at' => $batch->received_at->toDateTimeString(),
             ];
         });
@@ -219,13 +266,13 @@ class ProductController extends Controller
                 $productQty->total_displayed_quantity += $displayQty;
                 $productQty->save();
 
-                // Record activity
+                // Record activity using new model fields
                 DailyStockActivity::create([
                     'activity_id' => $activityId,
                     'product_id' => $productId,
                     'date' => now(),
                     'displayed_quantity' => $displayQty,
-                    'back_quantity' => 0,
+                    'returned_quantity' => 0,
                     'notes' => $notes,
                 ]);
             }
@@ -290,13 +337,13 @@ class ProductController extends Controller
                 $productQty->total_displayed_quantity = max(0, $productQty->total_displayed_quantity - $returnQty);
                 $productQty->save();
 
-                // Record activity
+                // Record activity using new model fields
                 DailyStockActivity::create([
                     'activity_id' => $activityId,
                     'product_id' => $productId,
                     'date' => now(),
                     'displayed_quantity' => 0,
-                    'back_quantity' => $returnQty,
+                    'returned_quantity' => $returnQty,
                     'notes' => $notes,
                 ]);
             }
@@ -314,19 +361,15 @@ class ProductController extends Controller
     // This Totals all without the outProducts and backProducts
     public function viewProductsQuantity()
     {
-        $products = StockBatches::select('product_id', 'product_name', 'entry_quantity')
+        $products = TotalProductQuantity::with('product')
             ->get()
-            ->groupBy('product_id')
-            ->map(function ($items) {
-            $first = $items->first();
-            $totalQuantity = $items->sum('entry_quantity');
-            return [
-                'product_id' => $first->product_id,
-                'product_name' => $first->product_name,
-                'entry_quantity' => (string)$totalQuantity,
-            ];
-            })
-            ->values();
+            ->map(function ($item) {
+                return [
+                    'product_id' => $item->product_id,
+                    'product_name' => optional($item->product)->product_name,
+                    'current_total_quantity' => (string)$item->current_total_quantity,
+                ];
+            });
 
         return response()->json($products);
     }
@@ -337,15 +380,18 @@ class ProductController extends Controller
 
         $result = [];
         $totalSum = 0;
+        $totalProfit = 0;
 
         foreach ($products as $product) {
             $latestBatch = StockBatches::where('product_id', $product->product_id)
                 ->orderByDesc('received_at')
                 ->first();
 
-            $unitCost = $latestBatch ? $latestBatch->unit_cost : 0;
+            $originalCost = $latestBatch ? $latestBatch->original_cost : 0;
+            $sellingCost = $latestBatch ? $latestBatch->selling_cost : 0;
             $soldQty = $product->total_displayed_quantity;
-            $subtotal = $soldQty * $unitCost;
+            $subtotal = $soldQty * $sellingCost;
+            $profit = $soldQty * ($sellingCost - $originalCost);
 
             // Reset total_displayed_quantity to 0 after calculation
             $product->sold_quantity = $soldQty;
@@ -356,16 +402,20 @@ class ProductController extends Controller
                 'product_id' => $product->product_id,
                 'product_name' => $latestBatch ? $latestBatch->product_name : null,
                 'sold_quantity' => $soldQty,
-                'unit_cost' => $unitCost,
+                'original_cost' => $originalCost,
+                'selling_cost' => $sellingCost,
                 'subtotal' => $subtotal,
+                'profit' => $profit,
             ];
 
             $totalSum += $subtotal;
+            $totalProfit += $profit;
         }
 
         return response()->json([
             'products' => $result,
             'total_sum' => $totalSum,
+            'total_profit' => $totalProfit,
         ]);
     }
 }

@@ -10,6 +10,7 @@ Route::prefix('inventory/')->name('inventory.')->group(function () {
         Route::post('create', [ProductController::class, 'createProduct'])->name('create-product');
         Route::get('view', [ProductController::class, 'viewProducts'])->name('view-products');
         Route::post('update/{id}', [ProductController::class, 'updateProductName'])->name('update-product');
+        Route::delete('delete/{id}', [ProductController::class, 'deleteProduct'])->name('delete-product');
     });
 
     Route::prefix('batch/')->name('batch.')->group(function () {
