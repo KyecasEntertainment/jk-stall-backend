@@ -19,6 +19,7 @@ return new class extends Migration
             $table->string("current_total_quantity")->nullable();
             $table->string("total_displayed_quantity")->nullable();
             $table->string("sold_quantity")->nullable();
+            $table->string("total_discarded_quantity")->nullable();
             $table->string("notes")->nullable();
             $table->timestamps();
         });

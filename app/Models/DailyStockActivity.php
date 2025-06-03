@@ -10,11 +10,9 @@ class DailyStockActivity extends Model
 
     protected $fillable = [
         'activity_id',
+        'activity_type',
         'product_id',
-        'date',
-        'displayed_quantity',
-        'returned_quantity',
-        'sold_quantity',
+        'quantity',
         'notes'
     ];
 

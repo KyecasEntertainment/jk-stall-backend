@@ -11,7 +11,10 @@ class TotalProductQuantity extends Model
     protected $fillable = [
         'product_id',
         'all_total_quantity',
-        'current_total_quantity'
+        'current_total_quantity',
+        'total_displayed_quantity',
+        'sold_quantity',
+        'total_discarded_quantity',
     ];
 
     public function product()
