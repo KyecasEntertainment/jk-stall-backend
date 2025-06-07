@@ -58,15 +58,40 @@ class ProductController extends Controller
         return response()->json($response, empty($createdProducts) ? 409 : 201);
     }
 
-    public function viewProducts(){
-        $products = ProductsList::all()->map(function ($product) {
-            return [
-                'product_id' => $product->product_id,
-                'product_name' => $product->product_name,
-            ];
-        });
+    public function viewProducts(Request $filter){
 
-        return response()->json($products);
+        if (is_null($filter)) {
+            $products = ProductsList::all()->map(function ($product) {
+                return [
+                    'product_id' => $product->product_id,
+                    'product_name' => $product->product_name,
+                ];
+            });
+
+            return response()->json($products);
+        }
+        // Filter: Recently by recently created products
+        else if ($filter->has('recently_added')) {
+            $products = ProductsList::orderBy('created_at', 'desc')->get()->map(function ($product) {
+                return [
+                    'product_id' => $product->product_id,
+                    'product_name' => $product->product_name,
+                ];
+            });
+
+            return response()->json($products);
+        }
+        //filter: Alphabetically by product name
+        else if ($filter->has('alphabetically')) {
+            $products = ProductsList::orderBy('product_name', 'asc')->get()->map(function ($product) {
+                return [
+                    'product_id' => $product->product_id,
+                    'product_name' => $product->product_name,
+                ];
+            });
+
+            return response()->json($products);
+        }
     }
 
     public function updateProductName(Request $request, $id)
@@ -205,22 +230,80 @@ class ProductController extends Controller
         ]);
     }
 
-    public function viewBatches()
+    public function viewBatches(Request $filter)
     {
-        $batches = StockBatches::all()->map(function ($batch) {
-            return [
-                'batch_id' => $batch->batch_id,
-                'product_id' => $batch->product_id,
-                'product_name' => $batch->product_name,
-                'entry_quantity' => (string)$batch->entry_quantity,
-                'original_cost' => (string)$batch->original_cost . ' Php',
-                'selling_cost' => (string)$batch->selling_cost . ' Php',
-                'received_at' => $batch->received_at->toDateTimeString(),
-            ];
-        });
+        if(is_null($filter)){        
+            $batches = StockBatches::all()->map(function ($batch) {
+                return [
+                    'batch_id' => $batch->batch_id,
+                    'product_id' => $batch->product_id,
+                    'product_name' => $batch->product_name,
+                    'entry_quantity' => (string)$batch->entry_quantity,
+                    'original_cost' => (string)$batch->original_cost . ' Php',
+                    'selling_cost' => (string)$batch->selling_cost . ' Php',
+                    'received_at' => $batch->received_at->toDateTimeString(),
+                ];
+            });
 
-        return response()->json($batches);
+            return response()->json($batches);
+        }
+
+        // Filter: Recently by recently created batches
+        else if ($filter->has('recently_added')) {
+            $batches = StockBatches::orderBy('received_at', 'desc')->get()->map(function ($batch) {
+                return [
+                    'batch_id' => $batch->batch_id,
+                    'product_id' => $batch->product_id,
+                    'product_name' => $batch->product_name,
+                    'entry_quantity' => (string)$batch->entry_quantity,
+                    'original_cost' => (string)$batch->original_cost . ' Php',
+                    'selling_cost' => (string)$batch->selling_cost . ' Php',
+                    'received_at' => $batch->received_at->toDateTimeString(),
+                ];
+            });
+
+            return response()->json($batches);
+        }
+        // Filter: Alphabetically by product name
+        else if ($filter->has('alphabetically')) {
+            $batches = StockBatches::orderBy('product_name', 'asc')->get()->map(function ($batch) {
+                return [
+                    'batch_id' => $batch->batch_id,
+                    'product_id' => $batch->product_id, 
+                    'product_name' => $batch->product_name,
+                    'entry_quantity' => (string)$batch->entry_quantity,
+                    'original_cost' => (string)$batch->original_cost . ' Php',
+                    'selling_cost' => (string)$batch->selling_cost . ' Php',
+                    'received_at' => $batch->received_at->toDateTimeString(),
+                ];
+            });
+            return response()->json($batches);
+        }
+        // Filter: Show only the latest batch for each product
+        else if ($filter->has('latest_batch')) {
+            $batches = StockBatches::select('product_id')
+                ->groupBy('product_id')
+                ->with(['latestBatch' => function ($query) {
+                    $query->orderBy('received_at', 'desc');
+                }])
+                ->get()
+                ->map(function ($item) {
+                    $latestBatch = $item->latestBatch->first();
+                    return [
+                        'batch_id' => $latestBatch->batch_id,
+                        'product_id' => $latestBatch->product_id,
+                        'product_name' => $latestBatch->product_name,
+                        'entry_quantity' => (string)$latestBatch->entry_quantity,
+                        'original_cost' => (string)$latestBatch->original_cost . ' Php',
+                        'selling_cost' => (string)$latestBatch->selling_cost . ' Php',
+                        'received_at' => $latestBatch->received_at->toDateTimeString(),
+                    ];
+                });
+
+            return response()->json($batches);
+        }
     }
+    
 
     // Update batch information
     public function updateBatch(Request $request, $batch_id, $product_id)
