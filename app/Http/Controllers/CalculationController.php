@@ -74,9 +74,6 @@ class CalculationController extends Controller
         ]);
     }
 
-
-    // Not used currently, but can be used for future profit calculations
-
     public function calculateProfit(Request $request){
         $monthSelected = $request->input('month_selected');
         $yearSelected = $request->input('year_selected');
@@ -115,11 +112,8 @@ class CalculationController extends Controller
 
     public function testRequest(Request $request)
     {
-        // Example of processing a request
         $data = $request->all();
 
-        // Perform some operations with the data
-        // For example, you can log it or return it as a response
         return response()->json([
             'message' => 'Test request received successfully.',
             'data' => $data,

@@ -60,18 +60,8 @@ class ProductController extends Controller
 
     public function viewProducts(Request $filter){
 
-        if (is_null($filter)) {
-            $products = ProductsList::all()->map(function ($product) {
-                return [
-                    'product_id' => $product->product_id,
-                    'product_name' => $product->product_name,
-                ];
-            });
-
-            return response()->json($products);
-        }
         // Filter: Recently by recently created products
-        else if ($filter->has('recently_added')) {
+        if ($filter->has('recently_added')) {
             $products = ProductsList::orderBy('created_at', 'desc')->get()->map(function ($product) {
                 return [
                     'product_id' => $product->product_id,
@@ -82,7 +72,7 @@ class ProductController extends Controller
             return response()->json($products);
         }
         //filter: Alphabetically by product name
-        else if ($filter->has('alphabetically')) {
+        else if ($filter->has('alphabetically_asc')) {
             $products = ProductsList::orderBy('product_name', 'asc')->get()->map(function ($product) {
                 return [
                     'product_id' => $product->product_id,
@@ -92,6 +82,17 @@ class ProductController extends Controller
 
             return response()->json($products);
         }
+        else if ($filter->has('alphabetically_desc')) {
+            $products = ProductsList::orderBy('product_name', 'desc')->get()->map(function ($product) {
+                return [
+                    'product_id' => $product->product_id,
+                    'product_name' => $product->product_name,
+                ];
+            });
+
+            return response()->json($products);
+        }
+
     }
 
     public function updateProductName(Request $request, $id)
@@ -683,18 +684,33 @@ class ProductController extends Controller
         ]);
     }
 
-    // This Totals all without the outProducts and backProducts
-    public function viewProductsQuantity()
+    public function viewProductsQuantity(Request $request)
     {
-        $products = TotalProductQuantity::with('product')
-            ->get()
-            ->map(function ($item) {
-                return [
-                    'product_id' => $item->product_id,
-                    'product_name' => optional($item->product)->product_name,
-                    'current_total_quantity' => (string)$item->current_total_quantity,
-                ];
-            });
+        $query = TotalProductQuantity::with('product');
+
+        // Apply sorting only if true
+        if ($request->boolean('recently_added')) {
+            $query->orderByDesc('created_at');
+        } elseif ($request->boolean('alphabetically_asc')) {
+            $query->join('products_lists', 'total_product_quantities.product_id', '=', 'products_lists.product_id')
+                ->orderBy('products_lists.product_name', 'asc');
+        } elseif ($request->boolean('alphabetically_desc')) {
+            $query->join('products_lists', 'total_product_quantities.product_id', '=', 'products_lists.product_id')
+                ->orderBy('products_lists.product_name', 'desc');
+        }
+
+        $products = $query->get()->map(function ($item) {
+            $latestStock = StockBatches::where('product_id', $item->product_id)
+                ->orderBy('received_at', 'desc')
+                ->first();
+
+            return [
+                'product_id' => $item->product_id,
+                'product_name' => optional($item->product)->product_name,
+                'current_total_quantity' => (string)$item->current_total_quantity,
+                'current_product_cost' => ($latestStock ? $latestStock->selling_cost : '0') . ' Php',
+            ];
+        });
 
         return response()->json($products);
     }

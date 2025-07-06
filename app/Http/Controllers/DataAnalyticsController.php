@@ -149,7 +149,6 @@ class DataAnalyticsController extends Controller
             $totalTodayDiscarded += $todayDiscard->total_discarded;
         }
 
-        // Sum up all yesterday's discarded quantities (including products not discarded today)
         foreach ($yesterdayDiscarded as $yesterdayDiscard) {
             $totalYesterdayDiscarded += $yesterdayDiscard->total_discarded;
         }

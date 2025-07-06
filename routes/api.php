@@ -20,6 +20,7 @@ Route::prefix('inventory/')->name('inventory.')->group(function () {
         Route::get('view', [ProductController::class, 'viewBatches'])->name('view-batches');
         Route::post('update/{batch_id}/{product_id}', [ProductController::class, 'updateBatch'])->name('update-batch');
         Route::delete('delete/{id}', [ProductController::class, 'deleteBatch'])->name('delete-batch');
+        // May cause issues to total product quantity
         Route::delete('delete-product/{id}', [ProductController::class, 'deleteProductFromBatch'])->name('delete-product-from-batch');
     });
 
@@ -27,14 +28,15 @@ Route::prefix('inventory/')->name('inventory.')->group(function () {
         Route::get('fetch', [DataAnalyticsController::class, 'calculateAnalytics'])->name('calculate-analytics');
     });
 
-    Route::get('view-products', [ProductController::class, 'viewProductsQuantity'])->name('view-products');
+    Route::get('view-product-status', [ProductController::class, 'viewProductsQuantity'])->name('view-products');
+    
 
     Route::post('display-product', [ProductController::class, 'displayProductsQuantity'])->name('display-product');
     Route::post('return-product', [ProductController::class, 'returnProductsQuantity'])->name('back-product');
     Route::post('discard-product', [ProductController::class, 'discardedProductQuantity'])->name('discard-product');
     Route::post('replace-discarded-product', [ProductController::class, 'replaceDiscardedProductsQuantity'])->name('replace-discarded-product');
 
-    Route::prefix('calculate-')->name('calculate.')->group(function () {
+    Route::prefix('calculate')->name('calculate.')->group(function () {
         Route::get('sold-quantity', [CalculationController::class, 'calculateSoldProductsToday'])->name('calculate-sold-quantity');
 
     });
