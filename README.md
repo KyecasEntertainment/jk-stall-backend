@@ -76,12 +76,6 @@ Base URL: `/api/inventory/`
 
 ---
 
-## 🕹️ Unity Integration
-
-Unity serves as the **frontend UI**, sending HTTP requests to the Laravel backend using `UnityWebRequest`. All data such as product stock, trends, and sales/profit info is rendered in real-time using Unity's interface.
-
----
-
 ## 🚀 Setup Instructions
 
 ```bash
