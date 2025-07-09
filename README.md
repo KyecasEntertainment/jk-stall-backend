@@ -8,7 +8,7 @@ A Laravel backend system to manage products, stock batches, inventory activities
 
 - **Backend**: Laravel 10+
 - **Frontend**: Unity (via API calls)
-- **Database**: MySQL / MariaDB
+- **Database**: Apache / MySQL
 - **Primary Models**: 
   - `ProductsList`
   - `StockBatches`
