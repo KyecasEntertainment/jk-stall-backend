@@ -1,3 +1,105 @@
+# 🛒 Inventory & Sales Management Backend (Laravel)
+
+A Laravel backend system to manage products, stock batches, inventory activities, sales tracking, and real-time analytics. It is designed to be consumed by a Unity-based frontend.
+
+---
+
+## 🧩 Tech Stack
+
+- **Backend**: Laravel 10+
+- **Frontend**: Unity (via API calls)
+- **Database**: Apache / MySQL
+- **Primary Models**: 
+  - `ProductsList`
+  - `StockBatches`
+  - `TotalProductQuantity`
+  - `SalesHistory`
+  - `DailyStockActivity`
+
+---
+
+## 🎯 Features
+
+- ✅ Product & Batch creation/update/deletion
+- 📦 Display, return, discard, or replace product quantities
+- 📊 Daily and monthly sales/profit calculations
+- 📈 Real-time analytics comparing today vs. yesterday
+- 🔄 Full integration with Unity via HTTP API
+
+---
+
+## 📡 API Endpoints
+
+Base URL: `/api/inventory/`
+
+### 🔧 Product Management
+| Endpoint | Method | Description |
+|---------|--------|-------------|
+| `products/create` | POST | Create a new product |
+| `products/view` | GET | View all products |
+| `products/update/{id}` | POST | Update a product name |
+| `products/delete/{id}` | DELETE | Delete a product |
+
+### 📦 Batch Management
+| Endpoint | Method | Description |
+|---------|--------|-------------|
+| `batch/create` | POST | Create a new stock batch |
+| `batch/view` | GET | View all batches |
+| `batch/update/{batch_id}/{product_id}` | POST | Update a specific batch |
+| `batch/delete/{id}` | DELETE | Delete a batch |
+| `batch/delete-product/{id}` | DELETE | Remove a product from a batch (may affect totals) |
+
+### 📈 Product Quantities
+| Endpoint | Method | Description |
+|---------|--------|-------------|
+| `view-product-status` | GET | View current product stock quantities |
+| `display-product` | POST | Display product (deduct from stock) |
+| `return-product` | POST | Return displayed product back to stock |
+| `discard-product` | POST | Discard damaged/expired product |
+| `replace-discarded-product` | POST | Replace previously discarded product |
+
+### 💰 Calculations
+| Endpoint | Method | Description |
+|---------|--------|-------------|
+| `calculate/sold-quantity` | GET | Calculate today's sold products & profit |
+| `calculate-profit` | POST | Calculate selected month’s total profit |
+
+### 📊 Analytics
+| Endpoint | Method | Description |
+|---------|--------|-------------|
+| `analytics/fetch` | GET | Retrieve per-product & daily analytics |
+
+### 🧪 Test
+| Endpoint | Method | Description |
+|---------|--------|-------------|
+| `test/request` | POST | Endpoint for testing raw request payload |
+
+---
+
+## 🚀 Setup Instructions
+
+```bash
+# 1. Clone the repository
+git clone <your-repo-url>
+cd <your-project-folder>
+
+# 2. Install dependencies
+composer install
+
+# 3. Set up environment
+cp .env.example .env
+php artisan key:generate
+
+# 4. Configure .env (DB connection, etc.)
+
+# 5. Run migrations
+php artisan migrate
+
+# 6. Serve the application
+php artisan serve
+
+```
+---
 <p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
 
 <p align="center">
@@ -59,3 +161,4 @@ If you discover a security vulnerability within Laravel, please send an e-mail t
 ## License
 
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+=======
