@@ -4,19 +4,17 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class DailyStockActivity extends Model
+class SalesHistory extends Model
 {
-    protected $table = 'daily_stock_activities';
+    protected $table = 'sales_histories';
 
     protected $fillable = [
-        'activity_id',
-        'activity_type',
+        'sale_id',
         'product_id',
-        'quantity',
-        'notes'
+        'quantity_sold',
     ];
 
-    public function stockBatch()
+    public function product()
     {
         return $this->belongsTo(ProductsList::class, 'product_id', 'product_id');
     }

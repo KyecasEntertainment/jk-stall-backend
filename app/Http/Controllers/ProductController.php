@@ -7,6 +7,7 @@ use App\Models\StockBatches;
 use App\Models\DailyStockActivity;
 use App\Models\TotalProductQuantity;
 use App\Models\ProductsList;
+use App\Models\SalesHistory;
 use Illuminate\Support\Str;
 
 
@@ -15,46 +16,89 @@ class ProductController extends Controller
     public function createProduct(Request $request)
     {
         $request->validate([
-            'product_name' => 'required|string|max:255',
+            'product_name' => 'required|array',
+            'product_name.*' => 'required|string|max:255',
         ]);
 
-        // Check if product name already exists
-        $existingProduct = ProductsList::where('product_name', $request->input('product_name'))->first();
-        if ($existingProduct) {
-            return response()->json([
-                'error' => 'Product name already exists.'
-            ], 409);
+        $createdProducts = [];
+        $errors = [];
+
+        foreach ($request->input('product_name') as $name) {
+            $existingProduct = ProductsList::where('product_name', $name)->first();
+            if ($existingProduct) {
+                $errors[] = [
+                    'product_name' => $name,
+                    'error' => 'Product name already exists.'
+                ];
+                continue;
+            }
+
+            $productID = 'prod-' . Str::uuid();
+
+            ProductsList::create([
+                'product_id' => $productID,
+                'product_name' => $name,
+            ]);
+
+            $createdProducts[] = [
+                'product_id' => $productID,
+                'product_name' => $name
+            ];
         }
 
-        $productID =  'prod-' . Str::uuid();
+        $response = [
+            'message' => 'Product creation completed.',
+            'created_products' => $createdProducts,
+        ];
 
-        ProductsList::create([
-            'product_id' => $productID,
-            'product_name' => $request->input('product_name'),
-        ]);
+        if (!empty($errors)) {
+            $response['errors'] = $errors;
+        }
 
-        return response()->json([
-            'message' => 'Product created successfully.',
-            'product_id' => $productID,
-            'product_name' => $request->input('product_name')
-        ], 201);
+        return response()->json($response, empty($createdProducts) ? 409 : 201);
     }
 
-    public function viewProducts(){
-        $products = ProductsList::all()->map(function ($product) {
-            return [
-                'product_id' => $product->product_id,
-                'product_name' => $product->product_name,
-            ];
-        });
+    public function viewProducts(Request $filter){
 
-        return response()->json($products);
+        // Filter: Recently by recently created products
+        if ($filter->has('recently_added')) {
+            $products = ProductsList::orderBy('created_at', 'desc')->get()->map(function ($product) {
+                return [
+                    'product_id' => $product->product_id,
+                    'product_name' => $product->product_name,
+                ];
+            });
+
+            return response()->json($products);
+        }
+        //filter: Alphabetically by product name
+        else if ($filter->has('alphabetically_asc')) {
+            $products = ProductsList::orderBy('product_name', 'asc')->get()->map(function ($product) {
+                return [
+                    'product_id' => $product->product_id,
+                    'product_name' => $product->product_name,
+                ];
+            });
+
+            return response()->json($products);
+        }
+        else if ($filter->has('alphabetically_desc')) {
+            $products = ProductsList::orderBy('product_name', 'desc')->get()->map(function ($product) {
+                return [
+                    'product_id' => $product->product_id,
+                    'product_name' => $product->product_name,
+                ];
+            });
+
+            return response()->json($products);
+        }
+
     }
 
     public function updateProductName(Request $request, $id)
     {
         $request->validate([
-            'product_name' => 'required|string|max:255',
+            'new_product_name' => 'required|string|max:255',
         ]);
 
         try {
@@ -71,7 +115,7 @@ class ProductController extends Controller
                 return response()->json(['error' => 'Product name already exists.'], 409);
             }
 
-            $product->product_name = $request->input('product_name');
+            $product->product_name = $request->input('new_product_name');
             $product->save();
 
             return response()->json([
@@ -84,13 +128,36 @@ class ProductController extends Controller
         }
     }
 
+    public function deleteProduct($id)
+    {
+        try {
+            $product = ProductsList::where('product_id', $id)->first();
+            if (!$product) {
+                return response()->json(['error' => 'Product not found.'], 404);
+            }
+
+            // Check if there are any batches associated with this product
+            if (StockBatches::where('product_id', $id)->exists()) {
+                return response()->json(['error' => 'Cannot delete product with existing stock batches.'], 400);
+            }
+
+            $product->delete();
+
+            return response()->json(['message' => 'Product deleted successfully.']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
     public function createBatch(Request $request)
     {
         $request->validate([
             'products_id' => 'required|array',
             'products_id.*' => 'required|string|max:255',
-            'price' => 'required|array',
-            'price.*' => 'required|numeric',
+            'original_price' => 'required|array',
+            'original_price.*' => 'required|numeric',
+            'selling_price' => 'required|array',
+            'selling_price.*' => 'required|numeric',
             'quantity' => 'required|array',
             'quantity.*' => 'required|integer|min:1',
         ]);
@@ -99,10 +166,15 @@ class ProductController extends Controller
         $products = [];
 
         $productIds = $request->input('products_id');
-        $prices = $request->input('price');
+        $originalPrices = $request->input('original_price');
+        $sellingPrices = $request->input('selling_price');
         $quantities = $request->input('quantity');
 
-        if (count($productIds) !== count($prices) || count($prices) !== count($quantities)) {
+        if (
+            count($productIds) !== count($originalPrices) ||
+            count($originalPrices) !== count($sellingPrices) ||
+            count($sellingPrices) !== count($quantities)
+        ) {
             return response()->json(['error' => 'Input arrays must be of the same length.'], 422);
         }
 
@@ -122,7 +194,8 @@ class ProductController extends Controller
                     'product_id' => $productId,
                     'product_name' => $productName,
                     'entry_quantity' => $quantities[$i],
-                    'unit_cost' => $prices[$i],
+                    'original_cost' => $originalPrices[$i],
+                    'selling_cost' => $sellingPrices[$i],
                     'received_at' => now(),
                 ]);
 
@@ -143,7 +216,8 @@ class ProductController extends Controller
                 $products[] = [
                     'product_id' => $productId,
                     'product_name' => $productName,
-                    'price' => (string)$prices[$i] . ' Pesos',
+                    'original_cost' => (string)$originalPrices[$i] . ' Php',
+                    'selling_cost' => (string)$sellingPrices[$i] . ' Php',
                     'quantity' => (string)$quantities[$i],
                 ];
             } catch (\Exception $e) {
@@ -151,27 +225,179 @@ class ProductController extends Controller
             }
         }
 
-
         return response()->json([
             'batch_id' => $batchId,
             'products' => $products,
         ]);
     }
 
-    public function viewBatches()
+    public function viewBatches(Request $filter)
     {
-        $batches = StockBatches::all()->map(function ($batch) {
-            return [
-                'batch_id' => $batch->batch_id,
-                'product_id' => $batch->product_id,
-                'product_name' => $batch->product_name,
-                'entry_quantity' => (string)$batch->entry_quantity,
-                'unit_cost' => (string)$batch->unit_cost,
-                'received_at' => $batch->received_at->toDateTimeString(),
-            ];
-        });
+        if(is_null($filter)){        
+            $batches = StockBatches::all()->map(function ($batch) {
+                return [
+                    'batch_id' => $batch->batch_id,
+                    'product_id' => $batch->product_id,
+                    'product_name' => $batch->product_name,
+                    'entry_quantity' => (string)$batch->entry_quantity,
+                    'original_cost' => (string)$batch->original_cost . ' Php',
+                    'selling_cost' => (string)$batch->selling_cost . ' Php',
+                    'received_at' => $batch->received_at->toDateTimeString(),
+                ];
+            });
 
-        return response()->json($batches);
+            return response()->json($batches);
+        }
+
+        // Filter: Recently by recently created batches
+        else if ($filter->has('recently_added')) {
+            $batches = StockBatches::orderBy('received_at', 'desc')->get()->map(function ($batch) {
+                return [
+                    'batch_id' => $batch->batch_id,
+                    'product_id' => $batch->product_id,
+                    'product_name' => $batch->product_name,
+                    'entry_quantity' => (string)$batch->entry_quantity,
+                    'original_cost' => (string)$batch->original_cost . ' Php',
+                    'selling_cost' => (string)$batch->selling_cost . ' Php',
+                    'received_at' => $batch->received_at->toDateTimeString(),
+                ];
+            });
+
+            return response()->json($batches);
+        }
+        // Filter: Alphabetically by product name
+        else if ($filter->has('alphabetically')) {
+            $batches = StockBatches::orderBy('product_name', 'asc')->get()->map(function ($batch) {
+                return [
+                    'batch_id' => $batch->batch_id,
+                    'product_id' => $batch->product_id, 
+                    'product_name' => $batch->product_name,
+                    'entry_quantity' => (string)$batch->entry_quantity,
+                    'original_cost' => (string)$batch->original_cost . ' Php',
+                    'selling_cost' => (string)$batch->selling_cost . ' Php',
+                    'received_at' => $batch->received_at->toDateTimeString(),
+                ];
+            });
+            return response()->json($batches);
+        }
+        // Filter: Show only the latest batch for each product
+        else if ($filter->has('latest_batch')) {
+            $batches = StockBatches::select('product_id')
+                ->groupBy('product_id')
+                ->with(['latestBatch' => function ($query) {
+                    $query->orderBy('received_at', 'desc');
+                }])
+                ->get()
+                ->map(function ($item) {
+                    $latestBatch = $item->latestBatch->first();
+                    return [
+                        'batch_id' => $latestBatch->batch_id,
+                        'product_id' => $latestBatch->product_id,
+                        'product_name' => $latestBatch->product_name,
+                        'entry_quantity' => (string)$latestBatch->entry_quantity,
+                        'original_cost' => (string)$latestBatch->original_cost . ' Php',
+                        'selling_cost' => (string)$latestBatch->selling_cost . ' Php',
+                        'received_at' => $latestBatch->received_at->toDateTimeString(),
+                    ];
+                });
+
+            return response()->json($batches);
+        }
+    }
+    
+
+    // Update batch information
+    public function updateBatch(Request $request, $batch_id, $product_id)
+    {
+        $request->validate([
+            'original_cost' => 'required|numeric',
+            'selling_cost' => 'required|numeric',
+            'entry_quantity' => 'required|integer|min:1',
+        ]);
+
+        try {
+            $batch = StockBatches::where('batch_id', $batch_id)->first();
+            if (!$batch) {
+                return response()->json(['error' => 'Batch not found.'], 404);
+            }
+
+            // Check if product exists
+            $product = ProductsList::where('product_id', $product_id)->first();
+            if (!$product) {
+                return response()->json(['error' => 'Product not found.'], 404);
+            }
+
+            // Update batch details
+            $batch->product_id = $request->input('product_id');
+            $batch->product_name = $product->product_name;
+            $batch->original_cost = $request->input('original_cost');
+            $batch->selling_cost = $request->input('selling_cost');
+            $batch->entry_quantity = $request->input('entry_quantity');
+            $batch->save();
+
+            return response()->json([
+                'message' => 'Batch updated successfully.',
+                'batch' => [
+                    'batch_id' => $batch->batch_id,
+                    'product_id' => $batch->product_id,
+                    'product_name' => $batch->product_name,
+                    'entry_quantity' => (string)$batch->entry_quantity,
+                    'original_cost' => (string)$batch->original_cost . ' Php',
+                    'selling_cost' => (string)$batch->selling_cost . ' Php',
+                    'received_at' => $batch->received_at->toDateTimeString(),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+    // Delete a batch
+    public function deleteBatch($id)
+    {
+        try {
+            $batch = StockBatches::where('batch_id', $id)->first();
+            if (!$batch) {
+                return response()->json(['error' => 'Batch not found.'], 404);
+            }
+
+            // Update the total quantities in TotalProductQuantity
+            $totalProduct = TotalProductQuantity::where('product_id', $batch->product_id)->first();
+            if ($totalProduct) {
+                $totalProduct->all_total_quantity -= $batch->entry_quantity;
+                $totalProduct->current_total_quantity -= $batch->entry_quantity;
+                $totalProduct->save();
+            }
+
+            $batch->delete();
+
+            return response()->json(['message' => 'Batch deleted successfully.']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+    // Delete a product from a batch
+    public function deleteProductFromBatch($id)
+    {
+        try {
+            $batch = StockBatches::where('product_id', $id)->first();
+            if (!$batch) {
+                return response()->json(['error' => 'Product not found in any batch.'], 404);
+            }
+
+            // Update the total quantities in TotalProductQuantity
+            $totalProduct = TotalProductQuantity::where('product_id', $id)->first();
+            if ($totalProduct) {
+                $totalProduct->all_total_quantity -= $batch->entry_quantity;
+                $totalProduct->current_total_quantity -= $batch->entry_quantity;
+                $totalProduct->save();
+            }
+
+            $batch->delete();
+
+            return response()->json(['message' => 'Product deleted from batch successfully.']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
     }
 
     // Fix notes not being saved on the database
@@ -184,7 +410,8 @@ class ProductController extends Controller
             'notes' => 'nullable|string|max:255',
         ]);
 
-        $activityId = 'display_' . Str::uuid();
+        $activityId = Str::uuid();
+        $activityType = 'display';
         $productIds = $request->input('product_id');
         $displayedQuantities = $request->input('displayed_quantity');
         $notes = $request->input('notes', null);
@@ -219,13 +446,12 @@ class ProductController extends Controller
                 $productQty->total_displayed_quantity += $displayQty;
                 $productQty->save();
 
-                // Record activity
+                // Record activity using new model fields
                 DailyStockActivity::create([
                     'activity_id' => $activityId,
+                    'activity_type' => $activityType,
                     'product_id' => $productId,
-                    'date' => now(),
-                    'displayed_quantity' => $displayQty,
-                    'back_quantity' => 0,
+                    'quantity' => $displayQty,
                     'notes' => $notes,
                 ]);
             }
@@ -251,7 +477,8 @@ class ProductController extends Controller
             'notes' => 'nullable|string|max:255',
         ]);
 
-        $activityId = 'back_' . Str::uuid();
+        $activityId = Str::uuid();
+        $activityType = 'return';
         $productIds = $request->input('product_id');
         $returnedQuantities = $request->input('returned_quantity');
         $notes = $request->input('notes', null);
@@ -290,13 +517,13 @@ class ProductController extends Controller
                 $productQty->total_displayed_quantity = max(0, $productQty->total_displayed_quantity - $returnQty);
                 $productQty->save();
 
-                // Record activity
+                // Record activity using new model fields
                 DailyStockActivity::create([
                     'activity_id' => $activityId,
+                    'activity_type' => $activityType,
                     'product_id' => $productId,
                     'date' => now(),
-                    'displayed_quantity' => 0,
-                    'back_quantity' => $returnQty,
+                    'quantity' => $returnQty,
                     'notes' => $notes,
                 ]);
             }
@@ -311,61 +538,181 @@ class ProductController extends Controller
         ]);
     }
 
-    // This Totals all without the outProducts and backProducts
-    public function viewProductsQuantity()
+    public function discardedProductQuantity(Request $request)
     {
-        $products = StockBatches::select('product_id', 'product_name', 'entry_quantity')
-            ->get()
-            ->groupBy('product_id')
-            ->map(function ($items) {
-            $first = $items->first();
-            $totalQuantity = $items->sum('entry_quantity');
+        $request->validate([
+            'product_id' => 'required|array',
+            'product_id.*' => 'required|string|max:255',
+            'discarded_quantity' => 'required|array',
+            'discarded_quantity.*' => 'required|integer|min:0',
+        ]);
+
+        $activityId = Str::uuid();
+        $activityType = 'discarded';
+        $productIds = $request->input('product_id');
+        $discardedQuantities = $request->input('discarded_quantity');
+
+        if (count($productIds) !== count($discardedQuantities)) {
+            return response()->json(['error' => 'Input arrays must be of the same length.'], 422);
+        }
+
+        $discarded = [];
+
+        try {
+            for ($i = 0; $i < count($productIds); $i++) {
+                $productId = $productIds[$i];
+                $discardQty = $discardedQuantities[$i];
+
+                $discarded[] = [
+                    'product_id' => $productId,
+                    'discarded_quantity' => (string)$discardQty,
+                ];
+
+                $productQty = TotalProductQuantity::where('product_id', $productId)->first();
+
+                if (!$productQty) {
+                    return response()->json([
+                        'error' => "Product {$productId} not found."
+                    ], 404);
+                }
+
+                if ($discardQty > $productQty->current_total_quantity) {
+                    return response()->json([
+                        'error' => "Discarded quantity for product {$productId} exceeds current available quantity."
+                    ], 400);
+                }
+
+                // Update the total quantities
+                $productQty->total_displayed_quantity -= $discardQty;
+                $productQty->total_discarded_quantity = isset($productQty->total_discarded_quantity) 
+                    ? $productQty->total_discarded_quantity + $discardQty 
+                    : $discardQty;
+                // $productQty->all_total_quantity -= $discardQty;
+                $productQty->save();
+
+                // Record activity
+                DailyStockActivity::create([
+                    'activity_id' => $activityId,
+                    'activity_type' => $activityType,
+                    'product_id' => $productId,
+                    'date' => now(),
+                    'quantity' => $discardQty,
+                    'notes' => null, // No notes for discarded products
+                ]);
+            }
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+
+        return response()->json([
+            'activity_id' => $activityId,
+            'discarded_products' => $discarded,
+        ]);
+        
+    }
+
+    public function replaceDiscardedProductsQuantity(Request $request)
+    {
+        $request->validate([
+            'product_id' => 'required|array',
+            'product_id.*' => 'required|string|max:255',
+            'replaced_quantity' => 'required|array',
+            'replaced_quantity.*' => 'required|integer|min:0',
+        ]);
+
+        $activityId = Str::uuid();
+        $activityType = 'replaced';
+        $productIds = $request->input('product_id');
+        $replacedQuantities = $request->input('replaced_quantity');
+
+        if (count($productIds) !== count($replacedQuantities)) {
+            return response()->json(['error' => 'Input arrays must be of the same length.'], 422);
+        }
+
+        $replaced = [];
+
+        try {
+            for ($i = 0; $i < count($productIds); $i++) {
+                $productId = $productIds[$i];
+                $replaceQty = $replacedQuantities[$i];
+
+                $replaced[] = [
+                    'product_id' => $productId,
+                    'replaced_quantity' => (string)$replaceQty,
+                ];
+
+                // Find the product quantity record
+                $productQty = TotalProductQuantity::where('product_id', $productId)->first();
+
+                if (!$productQty) {
+                    return response()->json([
+                        'error' => "Product {$productId} not found."
+                    ], 404);
+                }
+
+                // Check if replaced quantity does not exceed total_discarded_quantity
+                if (isset($productQty->total_discarded_quantity) && $replaceQty > $productQty->total_discarded_quantity) {
+                    return response()->json([
+                        'error' => "Replaced quantity for product {$productId} exceeds total discarded quantity."
+                    ], 400);
+                }
+
+                // Update the total quantities
+                $productQty->current_total_quantity += $replaceQty;
+                if (isset($productQty->total_discarded_quantity)) {
+                    $productQty->total_discarded_quantity = max(0, $productQty->total_discarded_quantity - $replaceQty);
+                }
+                $productQty->save();
+
+                // Record activity
+                DailyStockActivity::create([
+                    'activity_id' => $activityId,
+                    'activity_type' => $activityType,
+                    'product_id' => $productId,
+                    'quantity' => $replaceQty,
+                    'date' => now(),
+                    'notes' => null, // No notes for replaced products
+                ]);
+            }
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+
+        return response()->json([
+            'activity_id' => $activityId,
+            'replaced_products' => $replaced,
+        ]);
+    }
+
+    public function viewProductsQuantity(Request $request)
+    {
+        $query = TotalProductQuantity::with('product');
+
+        // Apply sorting only if true
+        if ($request->boolean('recently_added')) {
+            $query->orderByDesc('created_at');
+        } elseif ($request->boolean('alphabetically_asc')) {
+            $query->join('products_lists', 'total_product_quantities.product_id', '=', 'products_lists.product_id')
+                ->orderBy('products_lists.product_name', 'asc');
+        } elseif ($request->boolean('alphabetically_desc')) {
+            $query->join('products_lists', 'total_product_quantities.product_id', '=', 'products_lists.product_id')
+                ->orderBy('products_lists.product_name', 'desc');
+        }
+
+        $products = $query->get()->map(function ($item) {
+            $latestStock = StockBatches::where('product_id', $item->product_id)
+                ->orderBy('received_at', 'desc')
+                ->first();
+
             return [
-                'product_id' => $first->product_id,
-                'product_name' => $first->product_name,
-                'entry_quantity' => (string)$totalQuantity,
+                'product_id' => $item->product_id,
+                'product_name' => optional($item->product)->product_name,
+                'current_total_quantity' => (string)$item->current_total_quantity,
+                'current_product_cost' => ($latestStock ? $latestStock->selling_cost : '0') . ' Php',
             ];
-            })
-            ->values();
+        });
 
         return response()->json($products);
     }
 
-    public function calculateSoldProductsToday()
-    {
-        $products = TotalProductQuantity::where('total_displayed_quantity', '>', 0)->get();
-
-        $result = [];
-        $totalSum = 0;
-
-        foreach ($products as $product) {
-            $latestBatch = StockBatches::where('product_id', $product->product_id)
-                ->orderByDesc('received_at')
-                ->first();
-
-            $unitCost = $latestBatch ? $latestBatch->unit_cost : 0;
-            $soldQty = $product->total_displayed_quantity;
-            $subtotal = $soldQty * $unitCost;
-
-            // Reset total_displayed_quantity to 0 after calculation
-            $product->sold_quantity = $soldQty;
-            $product->total_displayed_quantity = 0;
-            $product->save();
-
-            $result[] = [
-                'product_id' => $product->product_id,
-                'product_name' => $latestBatch ? $latestBatch->product_name : null,
-                'sold_quantity' => $soldQty,
-                'unit_cost' => $unitCost,
-                'subtotal' => $subtotal,
-            ];
-
-            $totalSum += $subtotal;
-        }
-
-        return response()->json([
-            'products' => $result,
-            'total_sum' => $totalSum,
-        ]);
-    }
 }

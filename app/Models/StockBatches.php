@@ -17,8 +17,12 @@ class StockBatches extends Model
         'product_id',
         'product_name',
         'entry_quantity',
-        'unit_cost',
-        'received_at'
+        'original_cost',
+        'selling_cost',
+    ];
+
+    protected $casts = [
+    'received_at' => 'datetime',
     ];
 
     public function product()
