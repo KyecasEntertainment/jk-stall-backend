@@ -29,21 +29,18 @@ Route::prefix('inventory/')->name('inventory.')->group(function () {
     });
 
     Route::get('view-product-status', [ProductController::class, 'viewProductsQuantity'])->name('view-products');
-    
 
     Route::post('display-product', [ProductController::class, 'displayProductsQuantity'])->name('display-product');
     Route::post('return-product', [ProductController::class, 'returnProductsQuantity'])->name('back-product');
     Route::post('discard-product', [ProductController::class, 'discardedProductQuantity'])->name('discard-product');
     Route::post('replace-discarded-product', [ProductController::class, 'replaceDiscardedProductsQuantity'])->name('replace-discarded-product');
 
-    Route::prefix('calculate')->name('calculate.')->group(function () {
-        Route::get('sold-quantity', [CalculationController::class, 'calculateSoldProductsToday'])->name('calculate-sold-quantity');
-
-    });
+    Route::get('sold-quantity', [CalculationController::class, 'calculateSoldProductsToday'])->name('calculate-sold-quantity');
+    Route::get('activity-logs/fetch', [CalculationController::class, 'getActivityLogs'])->name('get-activity-logs');
 
     Route::prefix('test/')->name('test.')->group(function () {
         Route::post('request', [CalculationController::class, 'testRequest'])->name('test-request');
-        
+
     });
 
 });

@@ -137,9 +137,9 @@ class ProductController extends Controller
             }
 
             // Check if there are any batches associated with this product
-            if (StockBatches::where('product_id', $id)->exists()) {
-                return response()->json(['error' => 'Cannot delete product with existing stock batches.'], 400);
-            }
+            // if (StockBatches::where('product_id', $id)->exists()) {
+            //     return response()->json(['error' => 'Cannot delete product with existing stock batches.'], 400);
+            // }
 
             $product->delete();
 
@@ -163,6 +163,16 @@ class ProductController extends Controller
         ]);
 
         $batchId = 'batch_' . date('mdY') . '_' . uniqid();
+        // Get the current month abbreviation (e.g., 'Apr')
+        $month = date('M');
+        // Count how many batches have already been created this month
+        $batchCount = StockBatches::whereMonth('received_at', date('m'))
+            ->whereYear('received_at', date('Y'))
+            ->distinct('batch_id')
+            ->count('batch_id');
+        // Batch number is count + 1 (for the new batch)
+        $batchNumber = $batchCount + 1;
+        $batchName = "Batch {$month} {$batchNumber}";
         $products = [];
 
         $productIds = $request->input('products_id');
@@ -227,83 +237,55 @@ class ProductController extends Controller
 
         return response()->json([
             'batch_id' => $batchId,
+            'batch_name' => $batchName,
             'products' => $products,
         ]);
     }
 
     public function viewBatches(Request $filter)
     {
-        if(is_null($filter)){        
-            $batches = StockBatches::all()->map(function ($batch) {
+        // Fetch all batches
+        $batchesQuery = StockBatches::query();
+
+        // Apply filters if present
+        if ($filter->has('recently_added')) {
+            $batchesQuery->orderBy('received_at', 'desc');
+        } else if ($filter->has('alphabetically')) {
+            $batchesQuery->orderBy('product_name', 'asc');
+        }
+
+        $batches = $batchesQuery->get();
+
+        // Group by batch_id
+        $grouped = $batches->groupBy('batch_id')->map(function ($items, $batch_id) {
+            // Get the received_at from the first item (they all share the same in a batch)
+            $receivedAt = $items->first()->received_at->toDateTimeString();
+
+            // Map the products, filter out soft-deleted products
+            $products = $items->filter(function ($item) {
+                // Check if product is not soft deleted
+                $product = \App\Models\ProductsList::withTrashed()->where('product_id', $item->product_id)->first();
+                return !$product || is_null($product->deleted_at);
+            })->map(function ($item) {
                 return [
-                    'batch_id' => $batch->batch_id,
-                    'product_id' => $batch->product_id,
-                    'product_name' => $batch->product_name,
-                    'entry_quantity' => (string)$batch->entry_quantity,
-                    'original_cost' => (string)$batch->original_cost . ' Php',
-                    'selling_cost' => (string)$batch->selling_cost . ' Php',
-                    'received_at' => $batch->received_at->toDateTimeString(),
+                    'product_id'    => $item->product_id,
+                    'product_name'  => $item->product_name,
+                    'entry_quantity'=> (string)$item->entry_quantity,
+                    'original_cost' => (string)$item->original_cost . ' Php',
+                    'selling_cost'  => (string)$item->selling_cost . ' Php',
                 ];
             });
 
-            return response()->json($batches);
-        }
+            return [
+                'batch_id'    => $batch_id,
+                'received_at' => $receivedAt,
+                'products'    => $products->values(),
+            ];
+        })->values(); // Reset array indexes
 
-        // Filter: Recently by recently created batches
-        else if ($filter->has('recently_added')) {
-            $batches = StockBatches::orderBy('received_at', 'desc')->get()->map(function ($batch) {
-                return [
-                    'batch_id' => $batch->batch_id,
-                    'product_id' => $batch->product_id,
-                    'product_name' => $batch->product_name,
-                    'entry_quantity' => (string)$batch->entry_quantity,
-                    'original_cost' => (string)$batch->original_cost . ' Php',
-                    'selling_cost' => (string)$batch->selling_cost . ' Php',
-                    'received_at' => $batch->received_at->toDateTimeString(),
-                ];
-            });
-
-            return response()->json($batches);
-        }
-        // Filter: Alphabetically by product name
-        else if ($filter->has('alphabetically')) {
-            $batches = StockBatches::orderBy('product_name', 'asc')->get()->map(function ($batch) {
-                return [
-                    'batch_id' => $batch->batch_id,
-                    'product_id' => $batch->product_id, 
-                    'product_name' => $batch->product_name,
-                    'entry_quantity' => (string)$batch->entry_quantity,
-                    'original_cost' => (string)$batch->original_cost . ' Php',
-                    'selling_cost' => (string)$batch->selling_cost . ' Php',
-                    'received_at' => $batch->received_at->toDateTimeString(),
-                ];
-            });
-            return response()->json($batches);
-        }
-        // Filter: Show only the latest batch for each product
-        else if ($filter->has('latest_batch')) {
-            $batches = StockBatches::select('product_id')
-                ->groupBy('product_id')
-                ->with(['latestBatch' => function ($query) {
-                    $query->orderBy('received_at', 'desc');
-                }])
-                ->get()
-                ->map(function ($item) {
-                    $latestBatch = $item->latestBatch->first();
-                    return [
-                        'batch_id' => $latestBatch->batch_id,
-                        'product_id' => $latestBatch->product_id,
-                        'product_name' => $latestBatch->product_name,
-                        'entry_quantity' => (string)$latestBatch->entry_quantity,
-                        'original_cost' => (string)$latestBatch->original_cost . ' Php',
-                        'selling_cost' => (string)$latestBatch->selling_cost . ' Php',
-                        'received_at' => $latestBatch->received_at->toDateTimeString(),
-                    ];
-                });
-
-            return response()->json($batches);
-        }
+        return response()->json($grouped);
     }
+
     
 
     // Update batch information
@@ -686,18 +668,21 @@ class ProductController extends Controller
 
     public function viewProductsQuantity(Request $request)
     {
-        $query = TotalProductQuantity::with('product');
+        $query = TotalProductQuantity::query()
+            ->join('products_lists', 'total_product_quantities.product_id', '=', 'products_lists.product_id')
+            ->select('total_product_quantities.*', 'products_lists.product_name', 'products_lists.deleted_at');
 
         // Apply sorting only if true
         if ($request->boolean('recently_added')) {
-            $query->orderByDesc('created_at');
+            $query->orderByDesc('total_product_quantities.created_at');
         } elseif ($request->boolean('alphabetically_asc')) {
-            $query->join('products_lists', 'total_product_quantities.product_id', '=', 'products_lists.product_id')
-                ->orderBy('products_lists.product_name', 'asc');
+            $query->orderBy('products_lists.product_name', 'asc');
         } elseif ($request->boolean('alphabetically_desc')) {
-            $query->join('products_lists', 'total_product_quantities.product_id', '=', 'products_lists.product_id')
-                ->orderBy('products_lists.product_name', 'desc');
+            $query->orderBy('products_lists.product_name', 'desc');
         }
+
+        // Exclude soft deleted products
+        $query->whereNull('products_lists.deleted_at');
 
         $products = $query->get()->map(function ($item) {
             $latestStock = StockBatches::where('product_id', $item->product_id)
@@ -706,13 +691,35 @@ class ProductController extends Controller
 
             return [
                 'product_id' => $item->product_id,
-                'product_name' => optional($item->product)->product_name,
+                'product_name' => $item->product_name,
                 'current_total_quantity' => (string)$item->current_total_quantity,
-                'current_product_cost' => ($latestStock ? $latestStock->selling_cost : '0') . ' Php',
+                'current_product_cost' => ($latestStock ? $latestStock->selling_cost : '0'),
             ];
         });
 
         return response()->json($products);
+    }
+
+    public function restoreArchivedProduct($id)
+    {
+        try {
+            $product = ProductsList::withTrashed()->where('product_id', $id)->first();
+            if (!$product) {
+                return response()->json(['error' => 'Product not found.'], 404);
+            }
+
+            // Restore the product
+            $product->restore();
+
+            return response()->json([
+                'message' => 'Product restored successfully.',
+                'product_id' => $product->product_id,
+                'product_name' => $product->product_name,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+
     }
 
 }

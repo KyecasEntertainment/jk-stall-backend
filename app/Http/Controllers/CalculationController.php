@@ -7,6 +7,7 @@ use App\Models\TotalProductQuantity;
 use App\Models\StockBatches;
 use App\Models\SalesHistory;
 use App\Models\DailyStockActivity;
+use App\Models\ProductsList;
 use Illuminate\Support\Str;
 
 class CalculationController extends Controller
@@ -119,4 +120,33 @@ class CalculationController extends Controller
             'data' => $data,
         ]);
     }
+
+    public function getActivityLogs()
+    {
+        $logs = DailyStockActivity::orderBy('id', 'desc')->get();
+
+        if ($logs->isEmpty()) {
+            return response()->json(['message' => 'No activity logs found.'], 404);
+        }
+
+        $formattedLogs = $logs->map(function ($log) {
+            $product = ProductsList::where('product_id', $log->product_id)->first();
+
+            return [
+                'id' => $log->id,
+                'activity_id' => $log->activity_id,
+                'activity_type' => $log->activity_type,
+                'product_id' => $log->product_id,
+                'product_name' => $product ? $product->product_name : 'Deleted Product',
+                'quantity' => $log->quantity,
+                'notes' => $log->notes,
+                'created_at' => $log->created_at,
+                'updated_at' => $log->updated_at,
+            ];
+        });
+
+        return response()->json($formattedLogs);
+    }
+
+
 }
