@@ -22,49 +22,55 @@ class DataAnalyticsController extends Controller
         ]);
     }
 
-    private function getProductSoldProductAnalytics(){
+    private function getProductSoldProductAnalytics()
+    {
+        $today = now();
+        $startOfThisWeek = $today->copy()->subDays(6)->startOfDay(); // 7 days including today
+        $startOfLastWeek = $startOfThisWeek->copy()->subDays(7)->startOfDay();
+        $endOfLastWeek = $startOfThisWeek->copy()->subDay()->endOfDay();
 
-        $today = now()->format('Y-m-d');
-        $yesterday = now()->subDay()->format('Y-m-d');
-
-        $todaySales = SalesHistory::whereDate('created_at', $today)
+        // SALES HISTORY - Profit-based analytics
+        $thisWeekSales = SalesHistory::whereBetween('created_at', [$startOfThisWeek, $today])
             ->selectRaw('product_id, SUM(quantity_sold) as total_sold')
             ->groupBy('product_id')
             ->get();
-        $todaySalesQuantity = DailyStockActivity::whereDate('created_at', $today)
-            ->where('activity_type', 'sold')
-            ->selectRaw('product_id, SUM(quantity) as total_sold')
-            ->groupBy('product_id')
-            ->get();    
 
-        $yesterdaySales = SalesHistory::whereDate('created_at', $yesterday)
+        $lastWeekSales = SalesHistory::whereBetween('created_at', [$startOfLastWeek, $endOfLastWeek])
             ->selectRaw('product_id, SUM(quantity_sold) as total_sold')
             ->groupBy('product_id')
             ->get();
-        $yesterdaySalesQuantity = DailyStockActivity::whereDate('created_at', $yesterday)
+
+        // DAILY STOCK ACTIVITY - Quantity analytics
+        $thisWeekSalesQuantity = DailyStockActivity::whereBetween('created_at', [$startOfThisWeek, $today])
             ->where('activity_type', 'sold')
             ->selectRaw('product_id, SUM(quantity) as total_sold')
             ->groupBy('product_id')
             ->get();
+
+        $lastWeekSalesQuantity = DailyStockActivity::whereBetween('created_at', [$startOfLastWeek, $endOfLastWeek])
+            ->where('activity_type', 'sold')
+            ->selectRaw('product_id, SUM(quantity) as total_sold')
+            ->groupBy('product_id')
+            ->get();
+
+        $sumOfSoldThisWeek = $thisWeekSales->sum('total_sold');
+        $sumOfSoldLastWeek = $lastWeekSales->sum('total_sold');
+
 
         $profitAnalytics = [];
-        foreach ($todaySales as $todaySale) {
-            $yesterdaySale = $yesterdaySales->firstWhere('product_id', $todaySale->product_id);
-            $yesterdaySold = $yesterdaySale ? $yesterdaySale->total_sold : 0;
-            $difference = $todaySale->total_sold - $yesterdaySold;
+        foreach ($thisWeekSales as $thisSale) {
+            $lastSale = $lastWeekSales->firstWhere('product_id', $thisSale->product_id);
+            $lastSold = $lastSale ? $lastSale->total_sold : 0;
+            $difference = $thisSale->total_sold - $lastSold;
 
-            if ($yesterdaySold > 0) {
-                $percentChange = ($difference / $yesterdaySold) * 100;
-            } else {
-                $percentChange = $todaySale->total_sold > 0 ? 100 : 0;
-            }
-
+            $percentChange = $lastSold > 0 ? ($difference / $lastSold) * 100 : ($thisSale->total_sold > 0 ? 100 : 0);
             $trend = $difference > 0 ? 'increase' : ($difference < 0 ? 'decrease' : 'no_change');
 
             $profitAnalytics[] = [
-                'product' => ProductsList::where('product_id', $todaySale->product_id)->first(),
-                'today_sold' => $todaySale->total_sold,
-                'yesterday_sold' => $yesterdaySold,
+                'product' => ProductsList::where('product_id', $thisSale->product_id)->first(),
+                'this_week_sold' => $thisSale->total_sold,
+                'last_week_sold' => $lastSold,
+                'sum_last_week' => $sumOfSoldLastWeek,
                 'difference' => $difference,
                 'percent_change' => round($percentChange, 2),
                 'trend' => $trend
@@ -72,23 +78,18 @@ class DataAnalyticsController extends Controller
         }
 
         $quantityAnalytics = [];
-        foreach ($todaySalesQuantity as $todaySale) {
-            $yesterdaySale = $yesterdaySalesQuantity->firstWhere('product_id', $todaySale->product_id);
-            $yesterdaySold = $yesterdaySale ? $yesterdaySale->total_sold : 0;
-            $difference = $todaySale->total_sold - $yesterdaySold;
+        foreach ($thisWeekSalesQuantity as $thisSale) {
+            $lastSale = $lastWeekSalesQuantity->firstWhere('product_id', $thisSale->product_id);
+            $lastSold = $lastSale ? $lastSale->total_sold : 0;
+            $difference = $thisSale->total_sold - $lastSold;
 
-            if ($yesterdaySold > 0) {
-                $percentChange = ($difference / $yesterdaySold) * 100;
-            } else {
-                $percentChange = $todaySale->total_sold > 0 ? 100 : 0;
-            }
-
+            $percentChange = $lastSold > 0 ? ($difference / $lastSold) * 100 : ($thisSale->total_sold > 0 ? 100 : 0);
             $trend = $difference > 0 ? 'increase' : ($difference < 0 ? 'decrease' : 'no_change');
 
             $quantityAnalytics[] = [
-                'product' => ProductsList::where('product_id', $todaySale->product_id)->first(),
-                'today_sold' => $todaySale->total_sold,
-                'yesterday_sold' => $yesterdaySold,
+                'product' => ProductsList::where('product_id', $thisSale->product_id)->first(),
+                'this_week_sold' => $thisSale->total_sold,
+                'last_week_sold' => $lastSold,
                 'difference' => $difference,
                 'percent_change' => round($percentChange, 2),
                 'trend' => $trend
@@ -96,80 +97,78 @@ class DataAnalyticsController extends Controller
         }
 
         return [
-            'today' => $today,
-            // 'today_sales' => $todaySales,
-            'yesterday' => $yesterday,
-            // 'yesterday_sales' => $yesterdaySales,
+            'date_range_this_week' => [$startOfThisWeek->toDateString(), $today->toDateString()],
+            'date_range_last_week' => [$startOfLastWeek->toDateString(), $endOfLastWeek->toDateString()],
+            'this_week_sales' => $thisWeekSales,
+            'sum_this_week' => $sumOfSoldThisWeek,
+            'last_week_sales' => $lastWeekSales,
+            'sum_last_week' => $sumOfSoldLastWeek,
             'profit_analytics' => $profitAnalytics,
             'quantity_analytics' => $quantityAnalytics
         ];
     }
 
-    private function getDiscardedProductAnalytics(){
-        $today = now()->format('Y-m-d');
-        $yesterday = now()->subDay()->format('Y-m-d');
 
-        $todayDiscarded = DailyStockActivity::whereDate('created_at', $today)
+    private function getDiscardedProductAnalytics()
+    {
+        $today = now();
+        $startOfThisWeek = $today->copy()->subDays(6)->startOfDay(); // This week = last 7 days
+        $startOfLastWeek = $startOfThisWeek->copy()->subDays(7)->startOfDay();
+        $endOfLastWeek = $startOfThisWeek->copy()->subDay()->endOfDay();
+
+        $thisWeekDiscarded = DailyStockActivity::whereBetween('created_at', [$startOfThisWeek, $today])
             ->where('activity_type', 'discarded')
             ->selectRaw('product_id, SUM(quantity) as total_discarded')
             ->groupBy('product_id')
             ->get();
-        $yesterdayDiscarded = DailyStockActivity::whereDate('created_at', $yesterday)
+
+        $lastWeekDiscarded = DailyStockActivity::whereBetween('created_at', [$startOfLastWeek, $endOfLastWeek])
             ->where('activity_type', 'discarded')
             ->selectRaw('product_id, SUM(quantity) as total_discarded')
             ->groupBy('product_id')
             ->get();
 
         $analytics = [];
-        $totalTodayDiscarded = 0;
-        $totalYesterdayDiscarded = 0;
+        $totalThisWeekDiscarded = $thisWeekDiscarded->sum('total_discarded');
+        $totalLastWeekDiscarded = $lastWeekDiscarded->sum('total_discarded');
 
-        foreach ($todayDiscarded as $todayDiscard) {
-            $yesterdayDiscard = $yesterdayDiscarded->firstWhere('product_id', $todayDiscard->product_id);
-            $yesterdayDiscardedQuantity = $yesterdayDiscard ? $yesterdayDiscard->total_discarded : 0;
-            $difference = $todayDiscard->total_discarded - $yesterdayDiscardedQuantity;
+        foreach ($thisWeekDiscarded as $thisDiscard) {
+            $lastDiscard = $lastWeekDiscarded->firstWhere('product_id', $thisDiscard->product_id);
+            $lastDiscardedQuantity = $lastDiscard ? $lastDiscard->total_discarded : 0;
+            $difference = $thisDiscard->total_discarded - $lastDiscardedQuantity;
 
-            if ($yesterdayDiscardedQuantity > 0) {
-                $percentChange = ($difference / $yesterdayDiscardedQuantity) * 100;
-            } else {
-                $percentChange = $todayDiscard->total_discarded > 0 ? 100 : 0;
-            }
+            $percentChange = $lastDiscardedQuantity > 0
+                ? ($difference / $lastDiscardedQuantity) * 100
+                : ($thisDiscard->total_discarded > 0 ? 100 : 0);
 
             $trend = $difference > 0 ? 'increase' : ($difference < 0 ? 'decrease' : 'no_change');
 
             $analytics[] = [
-                'product' => ProductsList::where('product_id', $todayDiscard->product_id)->first(),
-                'today_discarded' => $todayDiscard->total_discarded,
-                'yesterday_discarded' => $yesterdayDiscardedQuantity,
+                'product' => ProductsList::where('product_id', $thisDiscard->product_id)->first(),
+                'this_week_discarded' => $thisDiscard->total_discarded,
+                'last_week_discarded' => $lastDiscardedQuantity,
                 'difference' => $difference,
                 'percent_change' => round($percentChange, 2),
                 'trend' => $trend
             ];
-
-            $totalTodayDiscarded += $todayDiscard->total_discarded;
         }
 
-        foreach ($yesterdayDiscarded as $yesterdayDiscard) {
-            $totalYesterdayDiscarded += $yesterdayDiscard->total_discarded;
-        }
-
-        $totalDifference = $totalTodayDiscarded - $totalYesterdayDiscarded;
-        if ($totalYesterdayDiscarded > 0) {
-            $totalPercentChange = ($totalDifference / $totalYesterdayDiscarded) * 100;
-        } else {
-            $totalPercentChange = $totalTodayDiscarded > 0 ? 100 : 0;
-        }
+        $totalDifference = $totalThisWeekDiscarded - $totalLastWeekDiscarded;
+        $totalPercentChange = $totalLastWeekDiscarded > 0
+            ? ($totalDifference / $totalLastWeekDiscarded) * 100
+            : ($totalThisWeekDiscarded > 0 ? 100 : 0);
 
         return [
-            'today' => $today,
-            'yesterday' => $yesterday,
-            'total_today_discarded' => $totalTodayDiscarded,
-            'total_yesterday_discarded' => $totalYesterdayDiscarded,
+            'date_range_this_week' => [$startOfThisWeek->toDateString(), $today->toDateString()],
+            'date_range_last_week' => [$startOfLastWeek->toDateString(), $endOfLastWeek->toDateString()],
+            'total_this_week_discarded' => $totalThisWeekDiscarded,
+            'total_last_week_discarded' => $totalLastWeekDiscarded,
             'total_difference' => $totalDifference,
             'total_percent_change' => round($totalPercentChange, 2),
             'analytics' => $analytics,
         ];
     }
+
 
     private function getPerProductAnalytics(){
         return ProductsList::all();
