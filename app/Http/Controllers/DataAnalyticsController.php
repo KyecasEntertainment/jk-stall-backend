@@ -11,7 +11,7 @@ use App\Models\ProductsList;
 class DataAnalyticsController extends Controller
 {
     public function calculateAnalytics(){
-        $soldProductAnalytics = $this->getProductSoldProductAnalytics();
+        $soldProductAnalytics = $this->getProductQuantitySoldAnalytics();
         $discardedProductAnalytics = $this->getDiscardedProductAnalytics();
         $perProductAnalytics = $this->getPerProductAnalytics();
 
@@ -22,14 +22,13 @@ class DataAnalyticsController extends Controller
         ]);
     }
 
-    private function getProductSoldProductAnalytics()
+    private function getProductQuantitySoldAnalytics()
     {
         $today = now();
         $startOfThisWeek = $today->copy()->subDays(6)->startOfDay(); // 7 days including today
         $startOfLastWeek = $startOfThisWeek->copy()->subDays(7)->startOfDay();
         $endOfLastWeek = $startOfThisWeek->copy()->subDay()->endOfDay();
 
-        // SALES HISTORY - Profit-based analytics
         $thisWeekSales = SalesHistory::whereBetween('created_at', [$startOfThisWeek, $today])
             ->selectRaw('product_id, SUM(quantity_sold) as total_sold')
             ->groupBy('product_id')
@@ -40,73 +39,25 @@ class DataAnalyticsController extends Controller
             ->groupBy('product_id')
             ->get();
 
-        // DAILY STOCK ACTIVITY - Quantity analytics
-        $thisWeekSalesQuantity = DailyStockActivity::whereBetween('created_at', [$startOfThisWeek, $today])
-            ->where('activity_type', 'sold')
-            ->selectRaw('product_id, SUM(quantity) as total_sold')
-            ->groupBy('product_id')
-            ->get();
-
-        $lastWeekSalesQuantity = DailyStockActivity::whereBetween('created_at', [$startOfLastWeek, $endOfLastWeek])
-            ->where('activity_type', 'sold')
-            ->selectRaw('product_id, SUM(quantity) as total_sold')
-            ->groupBy('product_id')
-            ->get();
-
         $sumOfSoldThisWeek = $thisWeekSales->sum('total_sold');
         $sumOfSoldLastWeek = $lastWeekSales->sum('total_sold');
 
-
-        $profitAnalytics = [];
-        foreach ($thisWeekSales as $thisSale) {
-            $lastSale = $lastWeekSales->firstWhere('product_id', $thisSale->product_id);
-            $lastSold = $lastSale ? $lastSale->total_sold : 0;
-            $difference = $thisSale->total_sold - $lastSold;
-
-            $percentChange = $lastSold > 0 ? ($difference / $lastSold) * 100 : ($thisSale->total_sold > 0 ? 100 : 0);
-            $trend = $difference > 0 ? 'increase' : ($difference < 0 ? 'decrease' : 'no_change');
-
-            $profitAnalytics[] = [
-                'product' => ProductsList::where('product_id', $thisSale->product_id)->first(),
-                'this_week_sold' => $thisSale->total_sold,
-                'last_week_sold' => $lastSold,
-                'sum_last_week' => $sumOfSoldLastWeek,
-                'difference' => $difference,
-                'percent_change' => round($percentChange, 2),
-                'trend' => $trend
-            ];
-        }
-
-        $quantityAnalytics = [];
-        foreach ($thisWeekSalesQuantity as $thisSale) {
-            $lastSale = $lastWeekSalesQuantity->firstWhere('product_id', $thisSale->product_id);
-            $lastSold = $lastSale ? $lastSale->total_sold : 0;
-            $difference = $thisSale->total_sold - $lastSold;
-
-            $percentChange = $lastSold > 0 ? ($difference / $lastSold) * 100 : ($thisSale->total_sold > 0 ? 100 : 0);
-            $trend = $difference > 0 ? 'increase' : ($difference < 0 ? 'decrease' : 'no_change');
-
-            $quantityAnalytics[] = [
-                'product' => ProductsList::where('product_id', $thisSale->product_id)->first(),
-                'this_week_sold' => $thisSale->total_sold,
-                'last_week_sold' => $lastSold,
-                'difference' => $difference,
-                'percent_change' => round($percentChange, 2),
-                'trend' => $trend
-            ];
-        }
+        $status = $sumOfSoldLastWeek > $sumOfSoldThisWeek ? 'decrease' : 'increase';
+        $difference = $sumOfSoldThisWeek - $sumOfSoldLastWeek;
+        $percentChange = $sumOfSoldLastWeek > 0
+            ? round(($difference / $sumOfSoldLastWeek) * 100, 2)
+            : ($sumOfSoldThisWeek > 0 ? 100 : 0);
 
         return [
             'date_range_this_week' => [$startOfThisWeek->toDateString(), $today->toDateString()],
             'date_range_last_week' => [$startOfLastWeek->toDateString(), $endOfLastWeek->toDateString()],
-            'this_week_sales' => $thisWeekSales,
             'sum_this_week' => $sumOfSoldThisWeek,
-            'last_week_sales' => $lastWeekSales,
             'sum_last_week' => $sumOfSoldLastWeek,
-            'profit_analytics' => $profitAnalytics,
-            'quantity_analytics' => $quantityAnalytics
+            'status' => $status,
+            'percent' => $percentChange
         ];
     }
+
 
 
     private function getDiscardedProductAnalytics()
