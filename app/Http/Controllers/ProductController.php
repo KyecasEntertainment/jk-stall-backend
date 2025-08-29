@@ -34,10 +34,17 @@ class ProductController extends Controller
             }
 
             $productID = 'prod-' . Str::uuid();
+            $activityId = Str::uuid();
 
             ProductsList::create([
                 'product_id' => $productID,
                 'product_name' => $name,
+            ]);
+            DailyStockActivity::create([
+                'activity_id' => $activityId,
+                'activity_type' => "Create",
+                'product_id' => $productID,
+                'quantity' => 0
             ]);
 
             $createdProducts[] = [
