@@ -11,21 +11,20 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('user_models', function (Blueprint $table) {
-            $table->string('uuid')->primary(); // custom UUID with prefix
-            $table->string('first_name');
-            $table->string('last_name');
-            $table->string('email')->unique();
-            $table->string('password');
+        Schema::create('anydesk_informations', function (Blueprint $table) {
+            $table->id();
+            $table->string("anydesk_id")->index();
+            $table->string("pc_info");
             $table->timestamps();
         });
     }
 
     /**
+     * 
      * Reverse the migrations.
      */
     public function down(): void
     {
-        Schema::dropIfExists('user_models');
+        Schema::dropIfExists('anydesk_informations');
     }
 };
